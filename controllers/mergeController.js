@@ -1,3 +1,47 @@
+// const XLSX = require('xlsx');
+// const AdmZip = require('adm-zip');
+
+// const mergeExcelFiles = async (req, res) => {
+//   try {
+//     const files = req.files;
+
+//     if (!files || files.length === 0) {
+//       return res.status(400).json({ message: 'No files uploaded.' });
+//     }
+
+//     let mergedData = [];
+
+//     for (const file of files) {
+//       const zip = new AdmZip(file.buffer);
+//       const zipEntries = zip.getEntries();
+
+//       for (const entry of zipEntries) {
+//         if (entry.entryName.endsWith('.xlsx')) {
+//           const workbook = XLSX.read(entry.getData(), { type: 'buffer' });
+//           const sheetName = workbook.SheetNames[0];
+//           const data = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: '' });
+//           mergedData = mergedData.concat(data);
+//         }
+//       }
+//     }
+
+//     const newWorkbook = XLSX.utils.book_new();
+//     const newWorksheet = XLSX.utils.json_to_sheet(mergedData);
+//     XLSX.utils.book_append_sheet(newWorkbook, newWorksheet, 'Merged');
+
+//     const outputBuffer = XLSX.write(newWorkbook, { bookType: 'xlsx', type: 'buffer' });
+
+//     res.setHeader('Content-Disposition', 'attachment; filename=merged.xlsx');
+//     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+//     res.send(outputBuffer);
+//   } catch (err) {
+//     console.error('Merge error:', err);
+//     res.status(500).json({ message: 'Error during merging files.' });
+//   }
+// };
+
+// module.exports = { mergeExcelFiles }; // ✅ Important
+
 const XLSX = require('xlsx');
 const AdmZip = require('adm-zip');
 
@@ -10,6 +54,7 @@ const mergeExcelFiles = async (req, res) => {
     }
 
     let mergedData = [];
+    let headerAdded = false;
 
     for (const file of files) {
       const zip = new AdmZip(file.buffer);
@@ -19,17 +64,34 @@ const mergeExcelFiles = async (req, res) => {
         if (entry.entryName.endsWith('.xlsx')) {
           const workbook = XLSX.read(entry.getData(), { type: 'buffer' });
           const sheetName = workbook.SheetNames[0];
-          const data = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: '' });
-          mergedData = mergedData.concat(data);
+          const data = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: '', header: 1 });
+
+          // Skip empty sheets
+          if (data.length === 0) continue;
+
+          if (!headerAdded) {
+            mergedData.push(...data); // include header
+            headerAdded = true;
+          } else {
+            mergedData.push(...data.slice(1)); // skip header
+          }
         }
       }
     }
 
-    const newWorkbook = XLSX.utils.book_new();
-    const newWorksheet = XLSX.utils.json_to_sheet(mergedData);
-    XLSX.utils.book_append_sheet(newWorkbook, newWorksheet, 'Merged');
+    if (mergedData.length === 0) {
+      return res.status(400).json({ message: 'No Excel data found in ZIPs.' });
+    }
 
-    const outputBuffer = XLSX.write(newWorkbook, { bookType: 'xlsx', type: 'buffer' });
+    const worksheet = XLSX.utils.aoa_to_sheet(mergedData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Merged');
+
+    const outputBuffer = XLSX.write(workbook, {
+      bookType: 'xlsx',
+      type: 'buffer',
+      compression: true, // Helps reduce size
+    });
 
     res.setHeader('Content-Disposition', 'attachment; filename=merged.xlsx');
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -40,4 +102,4 @@ const mergeExcelFiles = async (req, res) => {
   }
 };
 
-module.exports = { mergeExcelFiles }; // ✅ Important
+module.exports = { mergeExcelFiles };
