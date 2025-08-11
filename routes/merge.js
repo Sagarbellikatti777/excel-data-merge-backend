@@ -1,10 +1,14 @@
 const express = require('express');
-const router = express.Router();
 const multer = require('multer');
-const upload = multer(); // In-memory storage
+const { mergeExcelFiles } = require('../controllers/mergeController');
 
-const { mergeExcelFiles } = require('../controllers/mergeController');  // ✅ This line must match the export
+const router = express.Router();
 
-router.post('/merge', upload.array('files'), mergeExcelFiles); // ✅ Using multer middleware and correct function
+// Use memory storage for Multer
+const storage = multer.memoryStorage();
+const upload = multer({ storage });
+
+// API Route to handle file uploads and merging
+router.post('/merge', upload.array('files', 100), mergeExcelFiles);
 
 module.exports = router;
