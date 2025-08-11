@@ -299,7 +299,7 @@
 // module.exports = { mergeExcelFiles };
 
 
-const ExcelJS = require('exceljs');
+const XLSX = require('xlsx');
 const AdmZip = require('adm-zip');
 
 const mergeExcelFiles = async (req, res) => {
@@ -309,16 +309,10 @@ const mergeExcelFiles = async (req, res) => {
       return res.status(400).json({ message: 'No files uploaded.' });
     }
 
-    // Set the response headers for file download
-    res.setHeader('Content-Disposition', 'attachment; filename=merged.xlsx');
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-
-    const workbook = new ExcelJS.stream.xlsx.WorkbookWriter({ stream: res });
-    const worksheet = workbook.addWorksheet('Merged');
-
+    let mergedData = [];
     let headerWritten = false;
 
-    // Loop through all the uploaded files
+    // Process all files
     for (const file of files) {
       const zip = new AdmZip(file.buffer);
       const entries = zip.getEntries();
@@ -326,31 +320,38 @@ const mergeExcelFiles = async (req, res) => {
       for (const entry of entries) {
         if (entry.entryName.endsWith('.xlsx')) {
           const buffer = entry.getData();
-          const tempWorkbook = new ExcelJS.Workbook();
-          await tempWorkbook.xlsx.load(buffer);
+          const workbook = XLSX.read(buffer, { type: 'buffer' });
 
-          const sheet = tempWorkbook.worksheets[0];
-          if (!sheet) continue;
+          const sheetName = workbook.SheetNames[0];
+          const data = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: '', header: 1 });
 
-          // Process each row one by one to minimize memory usage
-          sheet.eachRow({ includeEmpty: true }, (row, rowNumber) => {
-            const rowValues = row.values.slice(1); // Remove empty first cell
-            if (rowNumber === 1 && !headerWritten) {
-              worksheet.addRow(rowValues);
-              headerWritten = true;
-            } else if (rowNumber !== 1) {
-              worksheet.addRow(rowValues);
-            }
-          });
+          // Skip empty sheets
+          if (data.length === 0) continue;
+
+          if (!headerWritten) {
+            mergedData.push(...data); // Include the header
+            headerWritten = true;
+          } else {
+            mergedData.push(...data.slice(1)); // Skip the header
+          }
         }
       }
     }
 
-    // Commit the worksheet and write the final file
-    await workbook.commit();
+    // Create a new workbook with merged data
+    const newWorkbook = XLSX.utils.book_new();
+    const newWorksheet = XLSX.utils.json_to_sheet(mergedData);
+    XLSX.utils.book_append_sheet(newWorkbook, newWorksheet, 'Merged');
+
+    const outputBuffer = XLSX.write(newWorkbook, { bookType: 'xlsx', type: 'buffer' });
+
+    res.setHeader('Content-Disposition', 'attachment; filename=merged_output.xlsx');
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.send(outputBuffer);
+
   } catch (err) {
-    console.error('Error during merge:', err);
-    res.status(500).json({ message: 'Error while merging Excel files.' });
+    console.error('Merge error:', err);
+    res.status(500).json({ message: 'Error during merging files.' });
   }
 };
 
